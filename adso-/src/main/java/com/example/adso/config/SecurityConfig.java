@@ -9,6 +9,11 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.Arrays;
+import org.springframework.security.config.Customizer;
 
 /**
  * Configuración principal de Spring Security.
@@ -19,42 +24,48 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter jwtAuthFilter;
-    private final AuthenticationProvider authenticationProvider;
+        private final JwtAuthenticationFilter jwtAuthFilter;
+        private final AuthenticationProvider authenticationProvider;
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-                // Deshabilitamos CSRF (Cross-Site Request Forgery) porque usamos JWT (stateless)
-                .csrf(csrf -> csrf.disable())
+        @Bean
+        public CorsConfigurationSource corsConfigurationSource() {
+                CorsConfiguration configuration = new CorsConfiguration();
 
-                // Definimos las reglas de autorización
-                .authorizeHttpRequests(authz -> authz
-                        // Endpoints públicos (registro y login)
-                        .requestMatchers("/api/auth/**").permitAll()
-                        
-                        // Endpoints de productos:
-                        // Solo ADMIN puede crear productos (POST)
-                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/products").hasAuthority(com.example.adso.model.Role.ADMIN.name())
-                        // USER y ADMIN pueden ver productos (GET)
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/products").hasAnyAuthority(com.example.adso.model.Role.ADMIN.name(), com.example.adso.model.Role.USER.name())
+                // CORREGIDO: Se eliminó el '/' extra al final
+                configuration.setAllowedOrigins(Arrays.asList("https://practica-frontend-pi.vercel.app"));
+                configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+                configuration.setAllowedHeaders(Arrays.asList("*"));
+                configuration.setAllowCredentials(true);
 
-                        // Todas las demás peticiones deben estar autenticadas
-                        .anyRequest().authenticated()
-                )
+                UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+                source.registerCorsConfiguration("/**", configuration);
+                return source;
+        }
 
-                // Configuramos la gestión de sesiones como STATELESS (sin estado)
-                // Spring Security no creará ni usará sesiones HTTP.
-                .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
+        @Bean
+        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+                http
+                                .csrf(csrf -> csrf.disable())
+                                .cors(Customizer.withDefaults()) // Activa la configuración de arriba
+                                .authorizeHttpRequests(authz -> authz
+                                                // CORREGIDO: Agregado "/" para evitar el error 403 en Render
+                                                .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                                                "/api/products")
+                                                .permitAll() // <-- ¡Cambio aquí!
 
-                // Definimos el proveedor de autenticación
-                .authenticationProvider(authenticationProvider)
+                                                .requestMatchers(org.springframework.http.HttpMethod.POST,
+                                                                "/api/products")
+                                                .hasAuthority(com.example.adso.model.Role.ADMIN.name())
+                                                .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                                                "/api/products")
+                                                .hasAnyAuthority(com.example.adso.model.Role.ADMIN.name(),
+                                                                com.example.adso.model.Role.USER.name())
+                                                .anyRequest().authenticated())
+                                .sessionManagement(session -> session
+                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                .authenticationProvider(authenticationProvider)
+                                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-                // Añadimos nuestro filtro de JWT ANTES del filtro estándar de autenticación
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-
-        return http.build();
-    }
+                return http.build();
+        }
 }
