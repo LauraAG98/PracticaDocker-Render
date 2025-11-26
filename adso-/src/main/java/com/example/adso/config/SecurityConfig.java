@@ -14,6 +14,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import java.util.Arrays;
 import org.springframework.security.config.Customizer;
+import com.example.adso.model.Role; // Asegúrate de que esta importación sea correcta
 
 /**
  * Configuración principal de Spring Security.
@@ -24,48 +25,51 @@ import org.springframework.security.config.Customizer;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-        private final JwtAuthenticationFilter jwtAuthFilter;
-        private final AuthenticationProvider authenticationProvider;
+    private final JwtAuthenticationFilter jwtAuthFilter;
+    private final AuthenticationProvider authenticationProvider;
 
-        @Bean
-        public CorsConfigurationSource corsConfigurationSource() {
-                CorsConfiguration configuration = new CorsConfiguration();
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        
+        // El origen de tu frontend en Vercel
+        configuration.setAllowedOrigins(Arrays.asList("https://practica-frontend-pi.vercel.app"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setAllowCredentials(true);
+        
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
 
-                // CORREGIDO: Se eliminó el '/' extra al final
-                configuration.setAllowedOrigins(Arrays.asList("https://practica-frontend-pi.vercel.app"));
-                configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-                configuration.setAllowedHeaders(Arrays.asList("*"));
-                configuration.setAllowCredentials(true);
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .cors(Customizer.withDefaults()) // Activa la configuración de CORS de arriba
+            .authorizeHttpRequests(authz -> authz
+                // RUTAS PÚBLICAS (Login y Registro)
+                .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/").permitAll() // Para el chequeo de salud
 
-                UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-                source.registerCorsConfiguration("/**", configuration);
-                return source;
-        }
+                // RUTA PROTEGIDA: Crear Producto (SOLO ADMIN)
+                .requestMatchers(org.springframework.http.HttpMethod.POST,
+                                 "/api/products")
+                .hasAuthority(Role.ADMIN.name()) // Requiere el rol ADMIN
 
-        @Bean
-        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-                http
-                                .csrf(csrf -> csrf.disable())
-                                .cors(Customizer.withDefaults()) // Activa la configuración de arriba
-                                .authorizeHttpRequests(authz -> authz
-                                                // CORREGIDO: Agregado "/" para evitar el error 403 en Render
-                                                .requestMatchers(org.springframework.http.HttpMethod.GET,
-                                                                "/api/products")
-                                                .permitAll() // <-- ¡Cambio aquí!
+                // RUTA PROTEGIDA: Obtener Productos (ADMIN Y USER)
+                .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                 "/api/products")
+                .hasAnyAuthority(Role.ADMIN.name(), Role.USER.name()) // Requiere ADMIN o USER
+                
+                // TODAS LAS DEMÁS PETICIONES REQUIEREN AUTENTICACIÓN
+                .anyRequest().authenticated())
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authenticationProvider(authenticationProvider)
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
-                                                .requestMatchers(org.springframework.http.HttpMethod.POST,
-                                                                "/api/products")
-                                                .hasAuthority(com.example.adso.model.Role.ADMIN.name())
-                                                .requestMatchers(org.springframework.http.HttpMethod.GET,
-                                                                "/api/products")
-                                                .hasAnyAuthority(com.example.adso.model.Role.ADMIN.name(),
-                                                                com.example.adso.model.Role.USER.name())
-                                                .anyRequest().authenticated())
-                                .sessionManagement(session -> session
-                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                                .authenticationProvider(authenticationProvider)
-                                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-
-                return http.build();
-        }
+        return http.build();
+    }
 }
